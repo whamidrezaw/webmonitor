@@ -1,0 +1,58 @@
+name: WebMonitor CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validate-and-test:
+    name: Validate Config, Audit Gates & Unit Tests (Python 3.12)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      WEBMONITOR_SKIP_BROWSER: "1"
+      PYTHONUNBUFFERED: "1"
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Prepare example configuration & run offline validator
+        run: |
+          if [ ! -f monitor-config.json ]; then
+            cp monitor-config.example.json monitor-config.json
+          fi
+          python monitor_system.py validate
+
+      - name: Run CLI & Store Audit Gate (CliAndStoreAuditTests)
+        run: |
+          python -u -m unittest tests.test_audit_fixes.CliAndStoreAuditTests -v
+
+      - name: Run full unit test suite (281+ tests)
+        run: |
+          python -u -m unittest discover -s tests -v
+
+      - name: Verify secure-by-default deployment package build
+        run: |
+          python monitor_system.py package -o monitor-deploy.zip
+          test -s monitor-deploy.zip
